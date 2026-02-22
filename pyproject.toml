@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dicom-mcp"
+version = "0.1.0"
+description = "MCP server for browsing and extracting DICOM series from a configurable root directory"
+readme = "dicom_mcp/README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp[cli]",
+  "numpy",
+  "Pillow",
+  "pydicom",
+]
+
+[project.scripts]
+dicom-mcp = "dicom_mcp.server:main"
+
+[tool.setuptools]
+packages = ["dicom_mcp"]
+
