@@ -1,0 +1,1 @@
+Verifies templated resources for multi-range and cropped metadata previews on SER00012. Tests dicom://series/SER00012/ranges/0-4,8-10 and dicom://series/SER00012/range/0/2/crop/10/20/30/40.

@@ -42,6 +42,42 @@ class CropSpec:
         return crop
 
 
+@dataclass(slots=True)
+class WindowSpec:
+    center: float
+    width: float
+
+    @classmethod
+    def from_value(cls, value: str | JsonDict | None) -> WindowSpec | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            key = value.strip().lower()
+            if key not in WINDOW_PRESETS:
+                raise ValueError(
+                    f"Unknown window preset '{value}'. "
+                    f"Available: {', '.join(sorted(WINDOW_PRESETS))}"
+                )
+            return WINDOW_PRESETS[key]
+        if isinstance(value, dict):
+            if "center" not in value or "width" not in value:
+                raise ValueError("Window dict must include 'center' and 'width'")
+            return cls(center=float(value["center"]), width=float(value["width"]))
+        raise TypeError(f"Unsupported window type: {type(value)}")
+
+
+WINDOW_PRESETS: dict[str, WindowSpec] = {
+    "bone": WindowSpec(center=300, width=1500),
+    "soft_tissue": WindowSpec(center=50, width=400),
+    "lung": WindowSpec(center=-600, width=1500),
+    "brain": WindowSpec(center=40, width=80),
+    "mediastinum": WindowSpec(center=50, width=350),
+    "liver": WindowSpec(center=60, width=150),
+    "stroke": WindowSpec(center=32, width=8),
+    "subdural": WindowSpec(center=75, width=215),
+}
+
+
 class DicomRepository:
     """Scans a root directory and exposes DICOM indexing/extraction helpers."""
 
@@ -90,6 +126,12 @@ class DicomRepository:
                 "sop_instance_uid": entry.get("sop_instance_uid"),
                 "rows": entry.get("rows"),
                 "columns": entry.get("columns"),
+                "slice_location": entry.get("slice_location"),
+                "image_position_patient": entry.get("image_position_patient"),
+                "slice_thickness": entry.get("slice_thickness"),
+                "pixel_spacing": entry.get("pixel_spacing"),
+                "rescale_slope": entry.get("rescale_slope"),
+                "rescale_intercept": entry.get("rescale_intercept"),
                 "path": entry["relative_path"],
             }
             for entry in entries
@@ -108,6 +150,8 @@ class DicomRepository:
         include_dicom_bytes_base64: bool = False,
         include_pixels: bool = False,
         normalize_mode: str = "percentile",
+        window: str | JsonDict | None = None,
+        step: int = 1,
     ) -> JsonDict:
         return self.extract_ranges(
             series_id=series_id,
@@ -118,6 +162,8 @@ class DicomRepository:
             include_dicom_bytes_base64=include_dicom_bytes_base64,
             include_pixels=include_pixels,
             normalize_mode=normalize_mode,
+            window=window,
+            step=step,
         )
 
     def extract_ranges(
@@ -131,13 +177,16 @@ class DicomRepository:
         include_dicom_bytes_base64: bool = False,
         include_pixels: bool = False,
         normalize_mode: str = "percentile",
+        window: str | JsonDict | None = None,
+        step: int = 1,
     ) -> JsonDict:
         entries = self._get_series_entries(series_id)
         if not entries:
             raise ValueError(f"No DICOM files found in series '{series_id}'")
 
         crop_spec = CropSpec.from_dict(crop)
-        selected_indices = _expand_ranges(ranges=ranges, total=len(entries))
+        window_spec = WindowSpec.from_value(window)
+        selected_indices = _expand_ranges(ranges=ranges, total=len(entries), step=step)
         annotations = annotations or []
 
         extracted: list[JsonDict] = []
@@ -153,6 +202,7 @@ class DicomRepository:
                 include_dicom_bytes_base64=include_dicom_bytes_base64,
                 include_pixels=include_pixels,
                 normalize_mode=normalize_mode,
+                window=window_spec,
             )
             extracted.append(item)
 
@@ -167,9 +217,76 @@ class DicomRepository:
             "crop": _crop_to_dict(crop_spec),
             "annotation_count": len(annotations),
             "normalize_mode": normalize_mode,
+            "window": (
+                {"center": window_spec.center, "width": window_spec.width}
+                if window_spec is not None
+                else None
+            ),
+            "step": step,
             "extracted_count": len(extracted),
             "instances": extracted,
         }
+
+    def get_pixel_stats(
+        self,
+        series_id: str,
+        index: int,
+        roi: JsonDict | None = None,
+    ) -> JsonDict:
+        """Compute HU pixel statistics for a slice, optionally within an ROI.
+
+        ROI schema: {"x": int, "y": int, "width": int, "height": int}
+        """
+        entries = self._get_series_entries(series_id)
+        if index < 0 or index >= len(entries):
+            raise ValueError(
+                f"index={index} out of bounds for series with {len(entries)} instances"
+            )
+        entry = entries[index]
+        ds = pydicom.dcmread(entry["absolute_path"])
+        pixel_array = ds.pixel_array.astype(np.float32)
+
+        slope = _safe_float(getattr(ds, "RescaleSlope", None)) or 1.0
+        intercept = _safe_float(getattr(ds, "RescaleIntercept", None)) or 0.0
+        hu = pixel_array * slope + intercept
+
+        roi_applied = None
+        if roi is not None:
+            rx, ry = int(roi["x"]), int(roi["y"])
+            rw, rh = int(roi["width"]), int(roi["height"])
+            # Clamp to image bounds
+            rows, cols = hu.shape[:2]
+            rx = max(0, min(rx, cols - 1))
+            ry = max(0, min(ry, rows - 1))
+            rw = max(1, min(rw, cols - rx))
+            rh = max(1, min(rh, rows - ry))
+            hu = hu[ry : ry + rh, rx : rx + rw]
+            roi_applied = {"x": rx, "y": ry, "width": rw, "height": rh}
+
+        flat = hu.ravel()
+        return _json_ready(
+            {
+                "series_id": series_id,
+                "index": index,
+                "file_name": entry["file_name"],
+                "rescale_slope": slope,
+                "rescale_intercept": intercept,
+                "roi": roi_applied,
+                "pixel_count": int(flat.size),
+                "min": float(np.min(flat)),
+                "max": float(np.max(flat)),
+                "mean": float(np.mean(flat)),
+                "median": float(np.median(flat)),
+                "std": float(np.std(flat)),
+                "percentiles": {
+                    "p5": float(np.percentile(flat, 5)),
+                    "p25": float(np.percentile(flat, 25)),
+                    "p50": float(np.percentile(flat, 50)),
+                    "p75": float(np.percentile(flat, 75)),
+                    "p95": float(np.percentile(flat, 95)),
+                },
+            }
+        )
 
     def preview_series_range_metadata(
         self,
@@ -241,6 +358,16 @@ class DicomRepository:
                     "sop_instance_uid": _safe_str(getattr(ds, "SOPInstanceUID", None)),
                     "rows": _safe_int(getattr(ds, "Rows", None)),
                     "columns": _safe_int(getattr(ds, "Columns", None)),
+                    "slice_location": _safe_float(getattr(ds, "SliceLocation", None)),
+                    "image_position_patient": _safe_float_list(
+                        getattr(ds, "ImagePositionPatient", None)
+                    ),
+                    "slice_thickness": _safe_float(getattr(ds, "SliceThickness", None)),
+                    "pixel_spacing": _safe_float_list(getattr(ds, "PixelSpacing", None)),
+                    "rescale_slope": _safe_float(getattr(ds, "RescaleSlope", None)),
+                    "rescale_intercept": _safe_float(
+                        getattr(ds, "RescaleIntercept", None)
+                    ),
                     "_first_meta": {
                         "patient_id": _safe_str(getattr(ds, "PatientID", None)),
                         "patient_name": _safe_str(getattr(ds, "PatientName", None)),
@@ -256,6 +383,16 @@ class DicomRepository:
                         "modality": _safe_str(getattr(ds, "Modality", None)),
                         "study_date": _safe_str(getattr(ds, "StudyDate", None)),
                         "study_time": _safe_str(getattr(ds, "StudyTime", None)),
+                        "body_part_examined": _safe_str(
+                            getattr(ds, "BodyPartExamined", None)
+                        ),
+                        "kvp": _safe_float(getattr(ds, "KVP", None)),
+                        "window_center": _safe_float(
+                            getattr(ds, "WindowCenter", None)
+                        ),
+                        "window_width": _safe_float(
+                            getattr(ds, "WindowWidth", None)
+                        ),
                     },
                 }
             )
@@ -288,6 +425,12 @@ class DicomRepository:
                 "modality": _safe_str(getattr(first_ds, "Modality", None)),
                 "study_date": _safe_str(getattr(first_ds, "StudyDate", None)),
                 "study_time": _safe_str(getattr(first_ds, "StudyTime", None)),
+                "body_part_examined": _safe_str(
+                    getattr(first_ds, "BodyPartExamined", None)
+                ),
+                "kvp": _safe_float(getattr(first_ds, "KVP", None)),
+                "window_center": _safe_float(getattr(first_ds, "WindowCenter", None)),
+                "window_width": _safe_float(getattr(first_ds, "WindowWidth", None)),
             }
             for item in raw_entries:
                 item["_series_meta"] = first_meta
@@ -316,6 +459,10 @@ class DicomRepository:
             "patient_name": series_meta.get("patient_name"),
             "study_date": series_meta.get("study_date"),
             "study_time": series_meta.get("study_time"),
+            "body_part_examined": series_meta.get("body_part_examined"),
+            "kvp": series_meta.get("kvp"),
+            "window_center": series_meta.get("window_center"),
+            "window_width": series_meta.get("window_width"),
             "first_file": first.get("relative_path"),
             "last_file": entries[-1].get("relative_path"),
         }
@@ -332,6 +479,7 @@ class DicomRepository:
         include_dicom_bytes_base64: bool,
         include_pixels: bool,
         normalize_mode: str,
+        window: WindowSpec | None = None,
     ) -> JsonDict:
         result: JsonDict = {
             "index": entry["index"],
@@ -344,6 +492,14 @@ class DicomRepository:
             "photometric_interpretation": _safe_str(
                 getattr(ds, "PhotometricInterpretation", None)
             ),
+            "slice_location": _safe_float(getattr(ds, "SliceLocation", None)),
+            "image_position_patient": _safe_float_list(
+                getattr(ds, "ImagePositionPatient", None)
+            ),
+            "slice_thickness": _safe_float(getattr(ds, "SliceThickness", None)),
+            "pixel_spacing": _safe_float_list(getattr(ds, "PixelSpacing", None)),
+            "rescale_slope": _safe_float(getattr(ds, "RescaleSlope", None)),
+            "rescale_intercept": _safe_float(getattr(ds, "RescaleIntercept", None)),
         }
 
         applied_annotations = _matching_annotations(annotations, result)
@@ -357,6 +513,9 @@ class DicomRepository:
                 crop_spec=crop_spec,
                 annotations=applied_annotations,
                 normalize_mode=normalize_mode,
+                window=window,
+                rescale_slope=result["rescale_slope"],
+                rescale_intercept=result["rescale_intercept"],
             )
             result["render"] = render_meta
             if include_png_base64:
@@ -378,6 +537,9 @@ def render_dicom_pixels(
     crop_spec: CropSpec | None = None,
     annotations: list[JsonDict] | None = None,
     normalize_mode: str = "percentile",
+    window: WindowSpec | None = None,
+    rescale_slope: float | None = None,
+    rescale_intercept: float | None = None,
 ) -> tuple[bytes, np.ndarray, JsonDict]:
     """Normalize -> optional crop -> annotate -> PNG encode."""
 
@@ -397,7 +559,13 @@ def render_dicom_pixels(
         raise ValueError(f"Unsupported pixel array shape: {arr.shape}")
 
     if arr.ndim == 2:
-        arr_u8 = _normalize_grayscale(arr, normalize_mode=normalize_mode)
+        arr_u8 = _normalize_grayscale(
+            arr,
+            normalize_mode=normalize_mode,
+            window=window,
+            rescale_slope=rescale_slope,
+            rescale_intercept=rescale_intercept,
+        )
         if (photometric_interpretation or "").upper() == "MONOCHROME1":
             arr_u8 = 255 - arr_u8
         image = PILImage.fromarray(arr_u8, mode="L").convert("RGB")
@@ -427,15 +595,22 @@ def render_dicom_pixels(
         "output_size": {"width": image.width, "height": image.height},
         "crop": crop_box,
         "applied_annotations": len(annotations),
+        "window": (
+            {"center": window.center, "width": window.width}
+            if window is not None
+            else None
+        ),
     }
     return png_bytes, processed_pixels, render_meta
 
 
-def _expand_ranges(*, ranges: list[JsonDict], total: int) -> list[int]:
+def _expand_ranges(*, ranges: list[JsonDict], total: int, step: int = 1) -> list[int]:
     if total <= 0:
         raise ValueError("Cannot expand ranges for empty series")
     if not ranges:
         raise ValueError("At least one range is required")
+    if step < 1:
+        raise ValueError("step must be >= 1")
 
     indices: list[int] = []
     seen: set[int] = set()
@@ -452,20 +627,36 @@ def _expand_ranges(*, ranges: list[JsonDict], total: int) -> list[int]:
             raise ValueError(
                 f"Range #{idx} end={end} is out of bounds for total={total}"
             )
-        for value in range(start, end + 1):
+        for value in range(start, end + 1, step):
             if value not in seen:
                 seen.add(value)
                 indices.append(value)
     return indices
 
 
-def _normalize_grayscale(arr: np.ndarray, *, normalize_mode: str = "percentile") -> np.ndarray:
+def _normalize_grayscale(
+    arr: np.ndarray,
+    *,
+    normalize_mode: str = "percentile",
+    window: WindowSpec | None = None,
+    rescale_slope: float | None = None,
+    rescale_intercept: float | None = None,
+) -> np.ndarray:
     data = arr.astype(np.float32)
+
+    if window is not None:
+        slope = rescale_slope if rescale_slope is not None else 1.0
+        intercept = rescale_intercept if rescale_intercept is not None else 0.0
+        hu = data * slope + intercept
+        lo = window.center - window.width / 2.0
+        hi = window.center + window.width / 2.0
+        scaled = np.clip((hu - lo) / (hi - lo), 0.0, 1.0)
+        return (scaled * 255.0).astype(np.uint8)
+
     if normalize_mode == "minmax":
         lo = float(np.min(data))
         hi = float(np.max(data))
     elif normalize_mode == "none":
-        # Best-effort cast.
         lo = 0.0
         hi = 255.0 if data.dtype.kind in ("u", "i") else float(np.max(data))
     else:
@@ -640,6 +831,26 @@ def _safe_int(value: Any) -> int | None:
         return None
     try:
         return int(value)
+    except Exception:
+        return None
+
+
+def _safe_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _safe_float_list(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    try:
+        if hasattr(value, "__iter__") and not isinstance(value, str):
+            return [float(v) for v in value]
+        return [float(value)]
     except Exception:
         return None
 

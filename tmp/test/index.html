@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MRI Findings: Patellar Tendinopathy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #111827; /* Dark background suited for medical imaging */
+            color: #e5e7eb;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+        }
+        .image-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #1f2937;
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            border: 1px solid #374151;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-6 font-sans">
+
+    <div class="max-w-6xl mx-auto">
+        <header class="mb-8 border-b border-gray-700 pb-4">
+            <h1 class="text-3xl font-bold text-white mb-2">MRI Findings: Patellar Tendinopathy</h1>
+            <p class="text-gray-400">Regions of interest (ROIs) overlaid on T1-weighted and Proton density fat-suppressed sagittal views.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            
+            <!-- Image 1a Container -->
+            <div class="image-container">
+                <h2 class="text-xl font-semibold mb-2 text-blue-300">Image 1a: T1-weighted</h2>
+                <p class="text-sm text-gray-400 mb-4 text-center">Shows intermediate signal and thickening at the proximal patellar tendon.</p>
+                <div class="relative w-full flex justify-center">
+                    <canvas id="canvas1a"></canvas>
+                </div>
+                <div class="mt-4 w-full text-sm">
+                    <div class="flex items-center gap-2 mb-1">
+                        <div class="w-4 h-4 bg-red-500 bg-opacity-40 border border-red-500"></div>
+                        <span>Thickened Proximal Patellar Tendon</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Image 1b Container -->
+            <div class="image-container">
+                <h2 class="text-xl font-semibold mb-2 text-blue-300">Image 1b: PD Fat-Suppressed</h2>
+                <p class="text-sm text-gray-400 mb-4 text-center">Shows high signal intensity (tendinosis) and adjacent fat pad edema.</p>
+                <div class="relative w-full flex justify-center">
+                    <canvas id="canvas1b"></canvas>
+                </div>
+                <div class="mt-4 w-full text-sm">
+                    <div class="flex items-center gap-2 mb-1">
+                        <div class="w-4 h-4 bg-red-500 bg-opacity-40 border border-red-500"></div>
+                        <span>Hyperintensity / Tendinosis</span>
+                    </div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <div class="w-4 h-4 bg-cyan-500 bg-opacity-40 border border-cyan-500"></div>
+                        <span>Hoffa's Fat Pad Edema</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // ROI Data using [ymin, xmin, ymax, xmax] on a 0-1000 scale
+        const data1a = [
+            { 
+                label: "Thickened Tendon", 
+                coords: [540, 150, 690, 280], 
+                color: "rgba(239, 68, 68, 0.3)", // Red-ish 
+                borderColor: "rgba(239, 68, 68, 1)" 
+            }
+        ];
+
+        const data1b = [
+            { 
+                label: "Tendinosis", 
+                coords: [540, 160, 690, 290], 
+                color: "rgba(239, 68, 68, 0.3)", // Red-ish
+                borderColor: "rgba(239, 68, 68, 1)" 
+            },
+            { 
+                label: "Edema", 
+                coords: [580, 280, 720, 400], 
+                color: "rgba(6, 182, 212, 0.3)", // Cyan-ish
+                borderColor: "rgba(6, 182, 212, 1)" 
+            }
+        ];
+
+        function drawImageWithROIs(canvasId, imageSrc, rois) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                // Set canvas dimensions to match the image exactly
+                canvas.width = img.width;
+                canvas.height = img.height;
+
+                // Draw the base MRI image
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                // Draw each ROI
+                rois.forEach(roi => {
+                    // Convert 0-1000 normalized coordinates to actual pixel dimensions
+                    const ymin = (roi.coords[0] / 1000) * canvas.height;
+                    const xmin = (roi.coords[1] / 1000) * canvas.width;
+                    const ymax = (roi.coords[2] / 1000) * canvas.height;
+                    const xmax = (roi.coords[3] / 1000) * canvas.width;
+
+                    const width = xmax - xmin;
+                    const height = ymax - ymin;
+
+                    // Draw fill
+                    ctx.fillStyle = roi.color;
+                    ctx.fillRect(xmin, ymin, width, height);
+
+                    // Draw border
+                    ctx.strokeStyle = roi.borderColor;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(xmin, ymin, width, height);
+
+                    // Draw Label with drop shadow for readability
+                    ctx.font = "bold 14px Arial";
+                    ctx.shadowColor = "black";
+                    ctx.shadowBlur = 4;
+                    ctx.lineWidth = 3;
+                    
+                    // Text border/stroke
+                    ctx.strokeText(roi.label, xmin, ymin - 6);
+                    
+                    // Text fill
+                    ctx.shadowBlur = 0; // Turn off shadow for fill
+                    ctx.fillStyle = roi.borderColor;
+                    ctx.fillText(roi.label, xmin, ymin - 6);
+                });
+            };
+
+            // In case of error loading (e.g., if files aren't in exact directory)
+            img.onerror = () => {
+                ctx.fillStyle = "#374151";
+                ctx.fillRect(0,0, 300, 300);
+                ctx.fillStyle = "white";
+                ctx.font = "14px sans-serif";
+                ctx.fillText(`Error loading ${imageSrc}`, 20, 50);
+                ctx.fillText(`Make sure the file is in the same directory.`, 20, 70);
+            };
+
+            // Load the image source
+            img.src = imageSrc;
+        }
+
+        // Initialize the canvases
+        window.addEventListener('DOMContentLoaded', () => {
+            // Using the exact filenames provided in the upload
+            drawImageWithROIs('canvas1a', '1a.jpg', data1a);
+            drawImageWithROIs('canvas1b', '1b.jpg', data1b);
+        });
+    </script>
+</body>
+</html>

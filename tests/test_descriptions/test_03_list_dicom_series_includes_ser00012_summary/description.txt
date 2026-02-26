@@ -1,0 +1,1 @@
+Verifies list_dicom_series returns a series list that includes SER00012 with expected summary metadata (rows, columns, instance_count) for this preconfigured dataset.

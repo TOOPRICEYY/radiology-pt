@@ -1,0 +1,1 @@
+Verifies extract_dicom_range for SER00012 over 0-10 using step=2 plus crop and radiological windowing. Confirms resolved indices, crop metadata, render output size, and applied window metadata.

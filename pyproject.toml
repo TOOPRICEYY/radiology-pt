@@ -11,13 +11,15 @@ requires-python = ">=3.11"
 dependencies = [
   "mcp[cli]",
   "numpy",
+  "openai",
   "Pillow",
   "pydicom",
 ]
 
 [project.scripts]
 dicom-mcp = "dicom_mcp.server:main"
+radiology-orchestrator = "orchestrator.__main__:main"
 
 [tool.setuptools]
-packages = ["dicom_mcp"]
+packages = ["dicom_mcp", "orchestrator"]
 

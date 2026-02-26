@@ -1,0 +1,1 @@
+Verifies extract_dicom_ranges for SER00012 using multiple ranges within 0-10. Confirms requested_ranges, resolved_indices ordering, and extracted instance count.

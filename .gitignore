@@ -48,3 +48,6 @@ id_ed25519
 .netrc
 .aws/credentials
 .aws/config
+
+dicom/*
+debug_runs/*

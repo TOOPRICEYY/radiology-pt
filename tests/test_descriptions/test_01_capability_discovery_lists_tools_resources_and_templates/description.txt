@@ -1,0 +1,1 @@
+Verifies MCP capability discovery endpoints: list_tools, list_resources, and list_resource_templates. Confirms the dicom_mcp server advertises the expected tool set and resource URI templates.

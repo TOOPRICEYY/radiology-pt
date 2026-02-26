@@ -1,0 +1,1 @@
+Verifies extract_dicom_range can return encoded payloads (PNG and DICOM bytes) for a slice in SER00012 within the 0-10 interval. Confirms the PNG header and non-empty DICOM byte payload.

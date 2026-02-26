@@ -109,6 +109,7 @@ def dicom_config() -> str:
                     "extract_dicom_range",
                     "extract_dicom_ranges",
                     "annotate_dicom_slice",
+                    "get_pixel_stats",
                 ],
             },
         }
@@ -232,11 +233,21 @@ def extract_dicom_range(
     include_dicom_bytes_base64: bool = False,
     include_pixels: bool = False,
     normalize_mode: str = "percentile",
+    window: str | dict | None = None,
+    step: int = 1,
 ) -> JsonDict:
     """Extract a contiguous inclusive index range from a series with optional crop/annotations.
 
     Indexing is zero-based and inclusive (`start` and `end` are positions inside the sorted
     series order).
+
+    `window` applies radiological windowing (HU-based). Pass a preset name string
+    ("bone", "soft_tissue", "lung", "brain", "mediastinum", "liver", "stroke", "subdural")
+    or a dict {"center": float, "width": float}. When set, pixel values are converted to
+    Hounsfield Units using RescaleSlope/Intercept then mapped through the window.
+
+    `step` controls stride for survey extraction. step=1 returns every slice (default),
+    step=10 returns every 10th slice within the range.
 
     `crop` schema:
       {"x": 10, "y": 20, "width": 200, "height": 150}
@@ -261,6 +272,8 @@ def extract_dicom_range(
         include_dicom_bytes_base64=include_dicom_bytes_base64,
         include_pixels=include_pixels,
         normalize_mode=normalize_mode,
+        window=window,
+        step=step,
     )
 
 
@@ -274,11 +287,20 @@ def extract_dicom_ranges(
     include_dicom_bytes_base64: bool = False,
     include_pixels: bool = False,
     normalize_mode: str = "percentile",
+    window: str | dict | None = None,
+    step: int = 1,
 ) -> JsonDict:
     """Extract multiple inclusive ranges from a series with optional crop and annotations.
 
     `ranges` schema:
       [{"start": 0, "end": 4}, {"start": 10, "end": 12}]
+
+    `window` applies radiological windowing (HU-based). Pass a preset name string
+    ("bone", "soft_tissue", "lung", "brain", "mediastinum", "liver", "stroke", "subdural")
+    or a dict {"center": float, "width": float}.
+
+    `step` controls stride for survey extraction. step=1 returns every slice (default),
+    step=10 returns every 10th slice within each range.
 
     Overlapping indices are de-duplicated in the order encountered.
     `annotations` uses the same schema as `extract_dicom_range`.
@@ -293,6 +315,8 @@ def extract_dicom_ranges(
         include_dicom_bytes_base64=include_dicom_bytes_base64,
         include_pixels=include_pixels,
         normalize_mode=normalize_mode,
+        window=window,
+        step=step,
     )
 
 
@@ -306,11 +330,16 @@ def annotate_dicom_slice(
     include_dicom_bytes_base64: bool = False,
     include_pixels: bool = False,
     normalize_mode: str = "percentile",
+    window: str | dict | None = None,
 ) -> JsonDict:
     """Extract a single DICOM slice with bbox/circle/ellipse overlays.
 
     `index` is the zero-based series index. `shapes` uses the same annotation schema as
     `extract_dicom_range`, but `target_index` is optional and will default to `index`.
+
+    `window` applies radiological windowing (HU-based). Pass a preset name string
+    ("bone", "soft_tissue", "lung", "brain", "mediastinum", "liver", "stroke", "subdural")
+    or a dict {"center": float, "width": float}.
     """
 
     normalized_shapes: list[JsonDict] = []
@@ -329,7 +358,32 @@ def annotate_dicom_slice(
         include_dicom_bytes_base64=include_dicom_bytes_base64,
         include_pixels=include_pixels,
         normalize_mode=normalize_mode,
+        window=window,
     )
+
+
+@mcp.tool()
+def get_pixel_stats(
+    series_id: str,
+    index: int,
+    roi: JsonDict | None = None,
+) -> JsonDict:
+    """Compute HU pixel statistics for a DICOM slice, optionally within an ROI.
+
+    Returns min/max/mean/median/std and percentiles (p5, p25, p50, p75, p95) in
+    Hounsfield Units. Use this to characterize tissue density:
+    - Air: ~-1000 HU
+    - Lung parenchyma: ~-700 to -600 HU
+    - Fat: ~-100 to -50 HU
+    - Water/fluid: ~0 HU
+    - Soft tissue: ~40-80 HU
+    - Calcification: >100 HU
+    - Bone: ~400-1000 HU
+
+    `roi` schema (optional): {"x": int, "y": int, "width": int, "height": int}
+    """
+
+    return _repo().get_pixel_stats(series_id=series_id, index=index, roi=roi)
 
 
 def _parse_args() -> argparse.Namespace:

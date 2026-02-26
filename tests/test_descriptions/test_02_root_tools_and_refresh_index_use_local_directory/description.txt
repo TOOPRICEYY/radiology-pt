@@ -1,0 +1,1 @@
+Verifies root management tools against the repository's local ./dicom directory. Tests set_dicom_root, get_dicom_root, and refresh_dicom_index and confirms the configured path exists and is indexed.

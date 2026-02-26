@@ -1,0 +1,1 @@
+Verifies JSON resources dicom://config, dicom://series, and dicom://series/SER00012. Confirms server config metadata, series listing presence, and series detail metadata for SER00012.

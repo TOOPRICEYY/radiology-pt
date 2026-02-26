@@ -56,10 +56,10 @@ python -m dicom_mcp.server
 }
 ```
 
-## Local Direct Function Example (No MCP Client)
+## Local MCP Client Example (stdio)
 
-This script imports `dicom_mcp.server` and calls the decorated resource/tool functions
-as regular Python functions (useful for local testing).
+This script launches `dicom_mcp.server` locally over stdio and uses the MCP Python SDK
+to call tools/resources through a real MCP client session (useful for local testing).
 
 ```bash
 python examples/call_dicom_mcp_locally.py --root ./dicom --save-png /tmp/annotated.png

@@ -52,6 +52,13 @@ You MUST respond with ONLY the following JSON structure. No prose outside this s
       "evidence_type": "primary | confirmatory | contradictory",
       "slices_examined": ["<series:slice references:preprocessing used>"],
       "differential": ["<possible interpretation 1>", "<possible interpretation 2>"],
+      "bounding_boxes": [
+        {
+          "box_2d": [y1, x1, y2, x2],
+          "slice_ref": "<series_id:slice_index:window — must match a slices_examined entry>",
+          "label": "<short label for the annotation>"
+        }
+      ]
     }
   ],
   "negative_findings": [
@@ -106,6 +113,15 @@ Set `next_request` to `null` when you believe exploration is complete. The orche
    When in doubt, use `low`. Express uncertainty rather than fabricating confidence.
 
 6. DIFFERENTIAL IS MANDATORY for any finding with confidence < `high`. List at least 2 possible interpretations.
+
+7. BOUNDING BOXES ARE MANDATORY for any finding with confidence `moderate` or `high` when images have been examined.
+   - Use normalized coordinates in the range 0–1000 for both axes: `box_2d: [y1, x1, y2, x2]`.
+   - `y1, x1` is the top-left corner; `y2, x2` is the bottom-right corner.
+   - Each bounding box must include a `slice_ref` matching one of your `slices_examined` entries so the orchestrator can map the box to the correct image.
+   - Draw the box tightly around the abnormality — not the entire region.
+   - For diffuse findings (e.g., edema spanning a muscle), draw the box around the most affected area.
+   - You may include multiple boxes per finding if the abnormality spans multiple slices.
+   - Low-confidence findings: bounding boxes are optional but encouraged when you can localize the observation.
 
 ---
 

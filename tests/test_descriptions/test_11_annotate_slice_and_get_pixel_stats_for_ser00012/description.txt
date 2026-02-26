@@ -1,0 +1,1 @@
+Verifies annotate_dicom_slice and get_pixel_stats on SER00012 (indices inside 0-10). Confirms annotation rendering and PNG output, plus full-slice and ROI pixel statistics responses.

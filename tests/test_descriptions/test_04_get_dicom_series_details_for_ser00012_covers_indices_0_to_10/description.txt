@@ -1,0 +1,1 @@
+Verifies get_dicom_series_details for SER00012 and checks that detailed instance metadata exists for indices 0 through 10 (within the requested range) with consistent dimensions.
